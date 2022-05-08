@@ -25,13 +25,13 @@ const char *bpName[4] = { "Static", "Gshare",
                           "Tournament", "Custom" };
 
 //define number of bits required for indexing the BHT here. 
-int ghistoryBits = 13; // Number of bits used for Global History
+int ghistoryBits = 17; // Number of bits used for Global History
 int bpType;       // Branch Prediction Type
 int verbose;
 
 int tourney_pcBits = 10;
-int tourney_localhistBits= 10;
-int tourney_ghistoryBits = 12;
+int tourney_localhistBits= 12;
+int tourney_ghistoryBits = 15;
 
 
 
@@ -65,6 +65,10 @@ int *tourney_localhist;
 void init_gshare() {
   int historyBits = 1 << ghistoryBits;
   gpredictors = (int*) malloc(historyBits * sizeof(int));
+
+  int tsize = ( pow(2,ghistoryBits)*2 + ghistoryBits)/8;
+  printf("Total size = %d B\n", tsize);
+
   for(int i = 0; i <= historyBits; i++) {
     gpredictors[i] = WN;
   }
@@ -75,6 +79,9 @@ void init_tourney() {
   int global_size = 1 << tourney_ghistoryBits;
   int local_size = 1 << tourney_pcBits;
   int local_width = 1 << tourney_localhistBits;
+
+  int tsize = ( (pow(2,tourney_pcBits) * tourney_localhistBits) + (pow(2,tourney_localhistBits) * 2 ) + pow(2,tourney_ghistoryBits)*4 + tourney_ghistoryBits)/8;
+  printf("Total size = %d B\n", tsize);
   tourney_gHistoryTable = 0; //GHR initialized to 0
     tourney_localhist = (int*) malloc( local_size * sizeof(int)); //1024 * 10 local history table
     tourney_local_bht = (int*) malloc( local_width * sizeof(int)); //1024 * 2 local history indexed bht
