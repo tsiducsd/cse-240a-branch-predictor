@@ -12,9 +12,9 @@
 //
 // TODO:Student Information
 //
-const char *studentName = "Gandhar Deshpande";
-const char *studentID   = "A59005457";
-const char *email       = "gdeshpande@ucsd.edu";
+const char *studentName = "Siddharth Thinakaran";
+const char *studentID   = "A59005429";
+const char *email       = "sthinakaran@ucsd.edu";
 
 //------------------------------------//
 //      Predictor Configuration       //
@@ -29,8 +29,8 @@ int ghistoryBits = 17; // Number of bits used for Global History
 int bpType;       // Branch Prediction Type
 int verbose;
 
-int tourney_pcBits = 10;
-int tourney_localhistBits= 12;
+int tourney_pcBits = 13;
+int tourney_localhistBits= 13;
 int tourney_ghistoryBits = 15;
 
 
@@ -48,10 +48,10 @@ uint64_t ghistory;
 
 //tournament
 int tourney_gHistoryTable;
-int *tourney_chooser;
-int *tourney_gpredictors;
-int *tourney_local_bht;
-int *tourney_localhist;
+uint8_t *tourney_chooser;
+uint8_t *tourney_gpredictors;
+uint8_t *tourney_local_bht;
+uint32_t *tourney_localhist;
 
 
 //------------------------------------//
@@ -65,9 +65,6 @@ int *tourney_localhist;
 void init_gshare() {
  int bht_entries = 1 << ghistoryBits;
   bht_gshare = (uint8_t*)malloc(bht_entries * sizeof(uint8_t));
-
-  int tsize = ( pow(2,ghistoryBits) + ghistoryBits)/8;
-  printf("Total size = %d B\n", tsize);
   int i = 0;
   for(i = 0; i< bht_entries; i++){
     bht_gshare[i] = WN;
@@ -80,22 +77,22 @@ void init_tourney() {
   int local_size = 1 << tourney_pcBits;
   int local_width = 1 << tourney_localhistBits;
 
-  int tsize = ( (pow(2,tourney_pcBits) * tourney_localhistBits) + (pow(2,tourney_localhistBits) * 2 ) + pow(2,tourney_ghistoryBits)*4 + tourney_ghistoryBits)/8;
+  int tsize = ( ((1 << tourney_pcBits) * tourney_localhistBits) + ((1 << tourney_localhistBits) * 2 ) + (1 << tourney_ghistoryBits)*4 + tourney_ghistoryBits)/8;
   printf("Total size = %d B\n", tsize);
   tourney_gHistoryTable = 0; //GHR initialized to 0
-    tourney_localhist = (int*) malloc( local_size * sizeof(int)); //1024 * 10 local history table
-    tourney_local_bht = (int*) malloc( local_width * sizeof(int)); //1024 * 2 local history indexed bht
-    tourney_gpredictors = (int*) malloc(global_size * sizeof(int)); //4096 * 2 global indexed bht
-    tourney_chooser = (int*) malloc(global_size * sizeof(int)); //4096 * 2 chooser bht
-  for(int i = 0; i <= global_size; i++) {
+    tourney_localhist = (uint32_t*) malloc( local_size * sizeof(uint32_t)); //1024 * 10 local history table
+    tourney_local_bht = (uint8_t*) malloc( local_width * sizeof(uint8_t)); //1024 * 2 local history indexed bht
+    tourney_gpredictors = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //4096 * 2 global indexed bht
+    tourney_chooser = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //4096 * 2 chooser bht
+  for(int i = 0; i < global_size; i++) {
     tourney_gpredictors[i] = WN; 
     tourney_chooser[i] = WN; //weakly choose global predictor initially
   }
-  for(int i = 0; i <= local_size; i++) {
-    tourney_localhist[i] = WN;
+  for(int i = 0; i < local_size; i++) {
+    tourney_localhist[i] = 0;
     tourney_local_bht[i] = WN;
   }
-  //printf("no problems in initializing\n");
+  tourney_gHistoryTable = 0;
 }
 
 
@@ -123,7 +120,7 @@ gshare_predict(uint32_t pc) {
 }
 
 uint8_t 
-tourney_global_predict(int ghistory_lower) {
+tourney_global_predict(uint32_t ghistory_lower) {
 
   switch(tourney_gpredictors[ghistory_lower]) {
     case SN:
@@ -141,9 +138,9 @@ tourney_global_predict(int ghistory_lower) {
 }
 
 uint8_t 
-tourney_local_predict(int pc_lower_bits) {
+tourney_local_predict(uint32_t pc_lower_bits) {
 
-  int local_history = tourney_localhist[pc_lower_bits] & ((1 << tourney_localhistBits) -1);
+  uint32_t local_history = tourney_localhist[pc_lower_bits] & ((1 << tourney_localhistBits) -1);
 
   switch(tourney_local_bht[local_history]) {
     case SN:
@@ -163,9 +160,9 @@ tourney_local_predict(int pc_lower_bits) {
 uint8_t
 tourney_predict(uint32_t pc) {
   //printf("predicting \n");
-  int historyBits = 1 << tourney_ghistoryBits;
-  int pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
-  int ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
+  uint32_t historyBits = 1 << tourney_ghistoryBits;
+  uint32_t pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
+  uint32_t ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
 
   switch(tourney_chooser[ghistory_lower]) {
     case SN:
@@ -214,7 +211,7 @@ train_gshare(uint32_t pc, uint8_t outcome) {
 }
 
 void
-tourney_global_train(int ghistory_lower, uint8_t outcome){
+tourney_global_train(uint32_t ghistory_lower, uint8_t outcome){
      
     switch(tourney_gpredictors[ghistory_lower]) {
     case SN:
@@ -236,10 +233,10 @@ tourney_global_train(int ghistory_lower, uint8_t outcome){
 }
 
 void
-tourney_local_train(int pc_lower_bits, uint8_t outcome){
+tourney_local_train(uint32_t pc_lower_bits, uint8_t outcome){
    
    //printf("pc_lower_bits = %d \n", pc_lower_bits);
-    int local_history = tourney_localhist[pc_lower_bits] & ((1 << tourney_localhistBits) -1);
+    uint32_t local_history = tourney_localhist[pc_lower_bits] & ((1 << tourney_localhistBits) -1);
    //printf("local_history = %d \n", local_history);
     switch(tourney_local_bht[local_history]) {
     case SN:
@@ -263,9 +260,9 @@ tourney_local_train(int pc_lower_bits, uint8_t outcome){
 void
 train_tourney(uint32_t pc, uint8_t outcome) {
   //printf("training \n");
-  int historyBits = 1 << tourney_ghistoryBits;
-  int pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
-  int ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
+  uint32_t historyBits = 1 << tourney_ghistoryBits;
+  uint32_t pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
+  uint32_t ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
 
   //printf("ghistory_lower = %d \n", ghistory_lower);
 
