@@ -5,7 +5,7 @@
 This is going to be the first programming assignment in CSE240A. The theme is, as the title suggests, a branch predictor. As I'm sure you know from what is covered in class, Branch Predictors are a critical part of the processor's front end, providing a great performance boost to the overall performance of the processor. In this assignment, we aren't giving you a full fledged processor simulator, but a rather simple model of a branch predictor. This model will have a few functions which you will have to add to, and design 2 new predictors in code. As a skeleton framework, we have provided you with an existing implementation of the GShare Predictor (correlating predictor). 
 
 ## The Task
-For this task, you will build 2 predictors based on the skeleton code. The first will be a Tournament branch predictor based on the Alpha 21264 processor. The other will be a custom implementation of your own choice which needs to outperform both the GShare and the Tournament predictors. This will also be a competition between the class itself, to get the maximum possible performance from your processor. The reward for the top 6 performers is extra credit points. The other condition in this scenario, is that you have only 32KB of hardware budget, so make sure that your data structures fit within this budget. 
+For this task, you will build 2 predictors based on the skeleton code. The first will be a Tournament branch predictor based on the Alpha 21264 processor. The other will be a custom implementation of your own choice which needs to outperform both the GShare and the Tournament predictors. This will also be a competition between the class itself, to get the maximum possible performance from your processor. The reward for the top 6 performers is extra credit points. The other condition in this scenario, is that you have only 32Kb + 320 bits(for registers and such) of hardware budget, so make sure that your data structures fit within this budget. 
 
 Here are some papers that you can refer to for the custom design:
 
@@ -30,6 +30,11 @@ You will add the tournament code based on the implementation that can be found i
 ## What should you edit?
 
 You need to edit the predictor.c for the most part. Add your functions and make sure they are referenced correctly so that your code runs perfectly. Do not edit any other files.
+
+## Testing
+To test your code in an environment similar to the autograder, we have created a docker image with the same specifications. To get this image, first install Docker on your computer. Then run command `docker pull gandhardesh13/240a_base:v2`. To run this image on your computer, run the following command `docker run --rm -it -v /path/to/branch/predictor/:/path/on/ubuntu/ gandhardesh13/240a_base:v2`
+A little more explanation on all these arguments you just added in your command : --rm will remove the container when you exit it, freeing up your resources. -it will make the container interactive.
+-v is used to bind a path on your computer to a path on the image. This helps you to develop your code on your computer in an IDE and just run it using the docker container. Please reach out to the course staff, if you face further challenges running this.
 
 ## Deliverables
 
