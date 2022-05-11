@@ -29,9 +29,12 @@ int ghistoryBits = 14; // Number of bits used for Global History
 int bpType;       // Branch Prediction Type
 int verbose;
 
-int tourney_pcBits = 13;
-int tourney_localhistBits= 13;
-int tourney_ghistoryBits = 15;
+int tourney_pcBits = 10;
+int tourney_localhistBits= 11;
+int tourney_ghistoryBits = 12;
+
+int yags_histBits = 12;
+int yags_pcBits = 10;
 
 
 
@@ -47,12 +50,19 @@ uint8_t *bht_gshare;
 uint64_t ghistory;
 
 //tournament
-int tourney_gHistoryTable;
+uint64_t tourney_gHistoryTable;
 uint8_t *tourney_chooser;
 uint8_t *tourney_gpredictors;
 uint8_t *tourney_local_bht;
 uint32_t *tourney_localhist;
 
+//custom-perceptron
+
+
+uint64_t yags_ghistory;
+uint8_t *yags_T_table;
+uint8_t *yags_NT_table;
+uint8_t *yags_choice_table;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -77,9 +87,8 @@ void init_tourney() {
   int local_size = 1 << tourney_pcBits;
   int local_width = 1 << tourney_localhistBits;
 
-  int tsize = ( ((1 << tourney_pcBits) * tourney_localhistBits) + ((1 << tourney_localhistBits) * 2 ) + (1 << tourney_ghistoryBits)*4 + tourney_ghistoryBits)/8;
-  printf("Total size = %d B\n", tsize);
-  tourney_gHistoryTable = 0; //GHR initialized to 0
+  int tsize = ( ((1 << tourney_pcBits) * tourney_localhistBits) + ((1 << tourney_localhistBits) * 2 ) + (1 << tourney_ghistoryBits)*4);
+  printf("Total size = %d\n", tsize);
     tourney_localhist = (uint32_t*) malloc( local_size * sizeof(uint32_t)); //1024 * 10 local history table
     tourney_local_bht = (uint8_t*) malloc( local_width * sizeof(uint8_t)); //1024 * 2 local history indexed bht
     tourney_gpredictors = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //4096 * 2 global indexed bht
@@ -95,6 +104,24 @@ void init_tourney() {
   tourney_gHistoryTable = 0;
 }
 
+
+void init_yags() {
+  int global_size = 1 << yags_histBits;
+  int chooser_size = 1 << yags_pcBits;
+  int tsize = global_size * 4 + chooser_size * 2;
+  printf("Total size = %d\n", tsize);
+    yags_T_table = (uint8_t*) malloc( global_size * sizeof(uint8_t)); //
+    yags_NT_table = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //
+    yags_choice_table = (uint8_t*) malloc(chooser_size * sizeof(uint8_t)); //
+  for(int i = 0; i < global_size; i++) {
+    yags_T_table[i] = WN; 
+    yags_NT_table[i] = WN;
+  }
+  for(int i = 0; i < chooser_size; i++) {
+    yags_choice_table[i] = WN;
+  }
+  yags_ghistory=0;
+}
 
 
 uint8_t 
@@ -173,6 +200,63 @@ tourney_predict(uint32_t pc) {
       return tourney_local_predict(pc_lower_bits);
     case ST:
       return tourney_local_predict(pc_lower_bits);
+    default:
+      printf("Undefined state in chooser table");
+      return NOTTAKEN;
+  }
+}
+
+uint8_t
+yags_T_predict(uint32_t index) {
+  switch(yags_T_table[index]) {
+    case SN:
+      return NOTTAKEN;
+    case WN:
+      return NOTTAKEN;
+    case WT:
+      return TAKEN;
+    case ST:
+      return TAKEN;
+    default:
+      printf("Warning: Undefined state of entry in yags true BHT!\n");
+      return NOTTAKEN;
+  }
+}
+
+uint8_t
+yags_NT_predict(uint32_t index) {
+  switch(yags_NT_table[index]) {
+    case SN:
+      return NOTTAKEN;
+    case WN:
+      return NOTTAKEN;
+    case WT:
+      return TAKEN;
+    case ST:
+      return TAKEN;
+    default:
+      printf("Warning: Undefined state of entry in yags not true BHT!\n");
+      return NOTTAKEN;
+  }
+}
+
+uint8_t
+yags_predict(uint32_t pc) {
+  //printf("predicting \n");
+  uint32_t historyBits = 1 << yags_histBits;
+  uint32_t pc_lower_bits = pc & (historyBits - 1);
+  uint32_t pc_index_bits = pc & ((1 << yags_pcBits) - 1);
+  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1);
+  uint32_t index = pc_lower_bits ^ ghistory_lower;
+  switch(yags_choice_table[pc_index_bits]) {
+    case SN:
+      return yags_NT_predict(index) ;
+    case WN:
+      return yags_NT_predict(index) ;
+    case WT:
+      return yags_T_predict(index) ;
+    case ST:
+      return yags_T_predict(index) ;
     default:
       printf("Undefined state in chooser table");
       return NOTTAKEN;
@@ -289,7 +373,90 @@ train_tourney(uint32_t pc, uint8_t outcome) {
   tourney_gHistoryTable = ((tourney_gHistoryTable << 1 ) | outcome);
 }
 
+void
+yags_T_train(uint32_t index, uint8_t outcome){
+     
+switch(yags_T_table[index]) {
+    case SN:
+      yags_T_table[index] = (outcome==TAKEN) ? WN : SN;
+      break;
+    case WN:
+      yags_T_table[index] = (outcome==TAKEN) ? WT : SN;
+      break;
+    case WT:
+      yags_T_table[index] = (outcome==TAKEN) ? ST : WN;
+      break;
+    case ST:
+      yags_T_table[index] = (outcome==TAKEN) ? ST : WT;
+      break;
+    default:
+      break;
+  }
+}
 
+void
+yags_NT_train(uint32_t index, uint8_t outcome){
+     
+switch(yags_NT_table[index]) {
+    case SN:
+      yags_NT_table[index] = (outcome==TAKEN) ? WN : SN;
+      break;
+    case WN:
+      yags_NT_table[index] = (outcome==TAKEN) ? WT : SN;
+      break;
+    case WT:
+      yags_NT_table[index] = (outcome==TAKEN) ? ST : WN;
+      break;
+    case ST:
+      yags_NT_table[index] = (outcome==TAKEN) ? ST : WT;
+      break;
+    default:
+      break;
+  }
+}
+
+void
+yags_train(uint32_t pc, uint8_t outcome) {
+  //printf("predicting \n");
+  uint32_t historyBits = 1 << yags_histBits;
+  uint32_t pc_lower_bits = pc & (historyBits - 1);
+  uint32_t pc_index_bits = pc & ((1 << yags_pcBits) - 1);
+  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1);
+  uint32_t index = pc_lower_bits ^ ghistory_lower;
+  switch(yags_choice_table[pc_index_bits]) {
+    case SN:
+      if(!((outcome == TAKEN) && (yags_NT_predict(index) == outcome)))
+      {
+        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WN : SN;
+      }
+      yags_NT_train(index, outcome);
+      break;
+    case WN:
+      if(!((outcome == TAKEN) && (yags_NT_predict(index) == outcome)))
+      {
+        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WT : SN;
+      }
+      yags_NT_train(index, outcome);
+      break;
+    case WT:
+      if(!((outcome == NOTTAKEN) && (yags_T_predict(index) == outcome)))
+      {
+        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WN;
+      }
+      yags_T_train(index, outcome);
+      break;
+    case ST:
+      if(!((outcome == NOTTAKEN) && (yags_T_predict(index) == outcome)))
+      {
+        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WT;
+      }
+      yags_T_train(index, outcome);
+      break;
+    default:
+      break;
+  }
+  yags_ghistory = ((yags_ghistory << 1 ) | outcome);
+}
 
 
 void
@@ -311,6 +478,8 @@ init_predictor()
       init_tourney();
       break;
     case CUSTOM:
+      init_yags();
+      break;
     default:
       break;
   }
@@ -334,6 +503,7 @@ make_prediction(uint32_t pc)
     case TOURNAMENT:
       return tourney_predict(pc);
     case CUSTOM:
+      return yags_predict(pc);
     default:
       break;
   }
@@ -358,6 +528,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
     case TOURNAMENT:
       return train_tourney(pc, outcome);
     case CUSTOM:
+      return yags_train(pc, outcome);
     default:
       break;
   }
