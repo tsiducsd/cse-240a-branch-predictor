@@ -35,6 +35,9 @@ int tourney_ghistoryBits = 12;
 
 int yags_histBits = 12;
 int yags_pcBits = 10;
+int yags_pcBits_tag = 0;
+int yags_histBits_chooser = 3;
+int yags_histBits_tag = 0;
 
 
 
@@ -60,8 +63,10 @@ uint32_t *tourney_localhist;
 
 
 uint64_t yags_ghistory;
-uint8_t *yags_T_table;
-uint8_t *yags_NT_table;
+uint8_t *yags_T_bht_table;
+uint32_t *yags_T_tag_table;
+uint8_t *yags_NT_bht_table;
+uint32_t *yags_NT_tag_table;
 uint8_t *yags_choice_table;
 
 //------------------------------------//
@@ -107,15 +112,21 @@ void init_tourney() {
 
 void init_yags() {
   int global_size = 1 << yags_histBits;
-  int chooser_size = 1 << yags_pcBits;
-  int tsize = global_size * 4 + chooser_size * 2;
+  int tag_size = yags_pcBits_tag + yags_histBits_tag ;
+  int chooser_size = 1 << (yags_pcBits+yags_histBits_chooser);
+  int tsize = global_size * (4+2*tag_size) + chooser_size * 2;
+
   printf("Total size = %d\n", tsize);
-    yags_T_table = (uint8_t*) malloc( global_size * sizeof(uint8_t)); //
-    yags_NT_table = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //
+    yags_T_bht_table = (uint8_t*) malloc( global_size * sizeof(uint8_t)); //
+    yags_T_tag_table = (uint32_t*)malloc( global_size * sizeof(uint32_t));
+    yags_NT_bht_table = (uint8_t*) malloc(global_size * sizeof(uint8_t)); //
+    yags_NT_tag_table  = (uint32_t*)malloc( global_size * sizeof(uint32_t));
     yags_choice_table = (uint8_t*) malloc(chooser_size * sizeof(uint8_t)); //
   for(int i = 0; i < global_size; i++) {
-    yags_T_table[i] = WN; 
-    yags_NT_table[i] = WN;
+    yags_T_bht_table[i] = WN; 
+    yags_T_tag_table[i] = 255;
+    yags_NT_bht_table[i] = WN;
+    yags_NT_tag_table[i] = 255;
   }
   for(int i = 0; i < chooser_size; i++) {
     yags_choice_table[i] = WN;
@@ -190,8 +201,9 @@ tourney_predict(uint32_t pc) {
   uint32_t historyBits = 1 << tourney_ghistoryBits;
   uint32_t pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
   uint32_t ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
+  uint32_t chooser = ghistory_lower;
 
-  switch(tourney_chooser[ghistory_lower]) {
+  switch(tourney_chooser[chooser]) {
     case SN:
       return tourney_global_predict(ghistory_lower);
     case WN:
@@ -208,7 +220,7 @@ tourney_predict(uint32_t pc) {
 
 uint8_t
 yags_T_predict(uint32_t index) {
-  switch(yags_T_table[index]) {
+  switch(yags_T_bht_table[index]) {
     case SN:
       return NOTTAKEN;
     case WN:
@@ -225,7 +237,7 @@ yags_T_predict(uint32_t index) {
 
 uint8_t
 yags_NT_predict(uint32_t index) {
-  switch(yags_NT_table[index]) {
+  switch(yags_NT_bht_table[index]) {
     case SN:
       return NOTTAKEN;
     case WN:
@@ -245,18 +257,39 @@ yags_predict(uint32_t pc) {
   //printf("predicting \n");
   uint32_t historyBits = 1 << yags_histBits;
   uint32_t pc_lower_bits = pc & (historyBits - 1);
-  uint32_t pc_index_bits = pc & ((1 << yags_pcBits) - 1);
-  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1);
-  uint32_t index = pc_lower_bits ^ ghistory_lower;
+  uint32_t hist_chooser_mask = ((1 << yags_histBits_chooser) -1) << yags_histBits; 
+  uint32_t pc_index_bits = ((yags_ghistory & hist_chooser_mask) >> (yags_histBits-yags_pcBits)) ^ (pc & ((1 << yags_pcBits) - 1)); //addressed only by PC
+  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1); 
+  uint32_t index = pc_lower_bits ^ ghistory_lower; //cache index same as gshare
+
+  uint32_t pc_tag_mask = (1 << yags_pcBits_tag) -1;
+  uint32_t hist_tag_mask = ((1 << yags_histBits_tag) -1) << yags_histBits; //14th to 11th bit mask
+  uint32_t tag = ((yags_ghistory & hist_tag_mask) >> (yags_histBits-yags_pcBits_tag)) | ((pc>>yags_pcBits) & pc_tag_mask);
+  //higher 4 bits are from the 14th to 11th bits of global history, the lower 6 bits are the lower 6 bits of the PC.
+  //efficient way to include correlation history? aliasing doesnt seem to be the problem, limited global history is.
+  //printf("tag = %x\n",(uint32_t)(hist_tag_mask));
+
   switch(yags_choice_table[pc_index_bits]) {
     case SN:
-      return yags_NT_predict(index) ;
+      if(yags_T_tag_table[index] == tag)
+        return yags_T_predict(index);
+      else
+        return NOTTAKEN;
     case WN:
-      return yags_NT_predict(index) ;
+      if(yags_T_tag_table[index] == tag)
+        return yags_T_predict(index);
+      else
+        return NOTTAKEN;
     case WT:
-      return yags_T_predict(index) ;
+      if(yags_NT_tag_table[index] == tag)
+        return yags_NT_predict(index);
+      else
+        return TAKEN;
     case ST:
-      return yags_T_predict(index) ;
+      if(yags_NT_tag_table[index] == tag)
+        return yags_NT_predict(index);
+      else
+        return TAKEN;
     default:
       printf("Undefined state in chooser table");
       return NOTTAKEN;
@@ -347,21 +380,21 @@ train_tourney(uint32_t pc, uint8_t outcome) {
   uint32_t historyBits = 1 << tourney_ghistoryBits;
   uint32_t pc_lower_bits = pc & ((1 << tourney_pcBits) - 1);
   uint32_t ghistory_lower = tourney_gHistoryTable & (historyBits - 1);
-
+  uint32_t chooser = ghistory_lower;
   //printf("ghistory_lower = %d \n", ghistory_lower);
 
-  switch(tourney_chooser[ghistory_lower]) {
+  switch(tourney_chooser[chooser]) {
     case SN:
-      tourney_chooser[ghistory_lower] = (outcome == tourney_global_predict(ghistory_lower))? SN: WN;
+      tourney_chooser[chooser] = (outcome == tourney_global_predict(ghistory_lower))? SN: (outcome == tourney_local_predict(pc_lower_bits)) ? WN : SN;
       break;
     case WN:
-      tourney_chooser[ghistory_lower] = (outcome == tourney_global_predict(ghistory_lower))? SN: WT;
+      tourney_chooser[chooser] = (outcome == tourney_global_predict(ghistory_lower))? SN: (outcome == tourney_local_predict(pc_lower_bits)) ? WT : WN;
       break;
     case WT:
-      tourney_chooser[ghistory_lower] = (outcome == tourney_local_predict(pc_lower_bits))? ST: WN;
+      tourney_chooser[chooser] = (outcome == tourney_local_predict(pc_lower_bits))? ST: (outcome == tourney_global_predict(ghistory_lower)) ? WN : WT;
       break;
     case ST:
-      tourney_chooser[ghistory_lower] = (outcome == tourney_local_predict(pc_lower_bits))? ST: WT;
+      tourney_chooser[chooser] = (outcome == tourney_local_predict(pc_lower_bits))? ST: (outcome == tourney_global_predict(ghistory_lower)) ? WT : ST;
       break;
     default:
       printf("Undefined state in chooser table");
@@ -376,18 +409,18 @@ train_tourney(uint32_t pc, uint8_t outcome) {
 void
 yags_T_train(uint32_t index, uint8_t outcome){
      
-switch(yags_T_table[index]) {
+switch(yags_T_bht_table[index]) {
     case SN:
-      yags_T_table[index] = (outcome==TAKEN) ? WN : SN;
+      yags_T_bht_table[index] = (outcome==TAKEN) ? WN : SN;
       break;
     case WN:
-      yags_T_table[index] = (outcome==TAKEN) ? WT : SN;
+      yags_T_bht_table[index] = (outcome==TAKEN) ? WT : SN;
       break;
     case WT:
-      yags_T_table[index] = (outcome==TAKEN) ? ST : WN;
+      yags_T_bht_table[index] = (outcome==TAKEN) ? ST : WN;
       break;
     case ST:
-      yags_T_table[index] = (outcome==TAKEN) ? ST : WT;
+      yags_T_bht_table[index] = (outcome==TAKEN) ? ST : WT;
       break;
     default:
       break;
@@ -397,18 +430,18 @@ switch(yags_T_table[index]) {
 void
 yags_NT_train(uint32_t index, uint8_t outcome){
      
-switch(yags_NT_table[index]) {
+switch(yags_NT_bht_table[index]) {
     case SN:
-      yags_NT_table[index] = (outcome==TAKEN) ? WN : SN;
+      yags_NT_bht_table[index] = (outcome==TAKEN) ? WN : SN;
       break;
     case WN:
-      yags_NT_table[index] = (outcome==TAKEN) ? WT : SN;
+      yags_NT_bht_table[index] = (outcome==TAKEN) ? WT : SN;
       break;
     case WT:
-      yags_NT_table[index] = (outcome==TAKEN) ? ST : WN;
+      yags_NT_bht_table[index] = (outcome==TAKEN) ? ST : WN;
       break;
     case ST:
-      yags_NT_table[index] = (outcome==TAKEN) ? ST : WT;
+      yags_NT_bht_table[index] = (outcome==TAKEN) ? ST : WT;
       break;
     default:
       break;
@@ -420,37 +453,89 @@ yags_train(uint32_t pc, uint8_t outcome) {
   //printf("predicting \n");
   uint32_t historyBits = 1 << yags_histBits;
   uint32_t pc_lower_bits = pc & (historyBits - 1);
-  uint32_t pc_index_bits = pc & ((1 << yags_pcBits) - 1);
-  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1);
-  uint32_t index = pc_lower_bits ^ ghistory_lower;
+  uint32_t hist_chooser_mask = ((1 << yags_histBits_chooser) -1) << yags_histBits; 
+  uint32_t pc_index_bits = ((yags_ghistory & hist_chooser_mask) >> (yags_histBits-yags_pcBits)) | (pc & ((1 << yags_pcBits) - 1)); //addressed only by PC //addressed only by PC
+  uint32_t ghistory_lower = yags_ghistory & (historyBits - 1); 
+  uint32_t index = pc_lower_bits ^ ghistory_lower; //cache index same as gshare
+
+  uint32_t pc_tag_mask = (1 << yags_pcBits_tag) -1;
+  uint32_t hist_tag_mask = ((1 << yags_histBits_tag) -1) << yags_histBits; //14th to 11th bit mask
+  uint32_t tag = ((yags_ghistory & hist_tag_mask) >> (yags_histBits-yags_pcBits_tag)) | ((pc>>yags_pcBits) & pc_tag_mask);
+  //higher 4 bits are from the 14th to 11th bits of global history, the lower 6 bits are 6 bits of pc after whatever chooser uses.
+  //efficient way to include correlation history? aliasing doesnt seem to be the problem, limited global history is.
+  //printf("tag = %x\n",(uint32_t)(tag));
   switch(yags_choice_table[pc_index_bits]) {
     case SN:
-      if(!((outcome == TAKEN) && (yags_NT_predict(index) == outcome)))
-      {
-        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WN : SN;
+      if(yags_T_tag_table[index] != tag){ //cache miss
+        if(outcome == TAKEN) { //chooser table wrong prediction, update cache with this outlier
+          yags_T_train(index, outcome);
+          yags_T_tag_table[index] = tag;
+        }
+        //if cache miss and chooser was correct, no need to update cache bht.
+        yags_choice_table[pc_index_bits] == (outcome==TAKEN) ? WN : SN; //update chooser table always if cache miss
       }
-      yags_NT_train(index, outcome);
+      else { //cache hit
+        if(yags_T_predict(index) != outcome) //cache bht incorrect
+        { 
+          yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WN : SN; //do not update chooser when cache bht is correct
+        }
+        yags_T_train(index, outcome); //update the cache bht always if cache hit
+        yags_T_tag_table[index] = tag;
+      }
       break;
     case WN:
-      if(!((outcome == TAKEN) && (yags_NT_predict(index) == outcome)))
-      {
-        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WT : SN;
+      if(yags_T_tag_table[index] != tag){ //cache miss
+        if(outcome == TAKEN) { //chooser table wrong prediction, update cache with this outlier
+          yags_T_train(index, outcome);
+          yags_T_tag_table[index] = tag;
+        }
+        //if cache miss and chooser was correct, no need to update cache.
+        yags_choice_table[pc_index_bits] == (outcome==TAKEN) ? WT : SN; //update chooser table always if cache miss
       }
-      yags_NT_train(index, outcome);
+      else { //cache hit
+        if(yags_T_predict(index) != outcome) //cache bht incorrect
+        { 
+          yags_choice_table[pc_index_bits] = (outcome == TAKEN)? WT : SN; //do not update chooser when cache bht is correct
+        }
+        yags_T_train(index, outcome); //update the cache bht always if cache hit
+        yags_T_tag_table[index] = tag;
+      }
       break;
     case WT:
-      if(!((outcome == NOTTAKEN) && (yags_T_predict(index) == outcome)))
-      {
-        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WN;
+      if(yags_NT_tag_table[index] != tag){ //cache miss
+        if(outcome == NOTTAKEN) { //chooser table wrong prediction, update cache with this outlier
+          yags_NT_train(index, outcome);
+          yags_NT_tag_table[index] = tag;
+        }
+        //if cache miss and chooser was correct, no need to update cache.
+        yags_choice_table[pc_index_bits] == (outcome==TAKEN) ? ST : WN; //update chooser table always if cache miss
       }
-      yags_T_train(index, outcome);
+      else { //cache hit
+        if(yags_NT_predict(index) != outcome) //cache bht incorrect
+        { 
+          yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WN; //do not update chooser when cache bht is correct
+        }
+        yags_NT_train(index, outcome); //update the cache bht always if cache hit
+        yags_NT_tag_table[index] = tag;
+      }
       break;
     case ST:
-      if(!((outcome == NOTTAKEN) && (yags_T_predict(index) == outcome)))
-      {
-        yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WT;
+      if(yags_NT_tag_table[index] != tag){ //cache miss
+        if(outcome == NOTTAKEN) { //chooser table wrong prediction, update cache with this outlier
+          yags_NT_train(index, outcome);
+          //yags_NT_tag_table[index] = tag;
+        }
+        //if cache miss and chooser was correct, no need to update cache.
+        yags_choice_table[pc_index_bits] == (outcome==TAKEN) ? ST : WT; //update chooser table always if cache miss
       }
-      yags_T_train(index, outcome);
+      else { //cache hit
+        if(yags_NT_predict(index) != outcome) //cache bht incorrect
+        { 
+          yags_choice_table[pc_index_bits] = (outcome == TAKEN)? ST : WT; //do not update chooser when cache bht is correct
+        }
+        yags_NT_train(index, outcome); //update the cache bht always if cache hit
+        yags_NT_tag_table[index] = tag;
+      }
       break;
     default:
       break;
