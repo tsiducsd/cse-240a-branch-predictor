@@ -34,9 +34,9 @@ int tourney_localhistBits= 11;
 int tourney_ghistoryBits = 12;
 
 int yags_histBits = 12;
-int yags_pcBits = 10;
+int yags_pcBits = 7;
 int yags_pcBits_tag = 0;
-int yags_histBits_chooser = 3;
+int yags_histBits_chooser = 6;
 int yags_histBits_tag = 0;
 
 
